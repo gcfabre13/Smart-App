@@ -31,6 +31,10 @@
     .results-list dd { margin: 0; font-size: 1.15rem; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
     .result-date { display: block; margin-top: 0.15rem; color: #526574; font-size: 0.88rem; font-weight: 400; }
     .error { border-left: 0.3rem solid #8b1e1e; }
+    .diagnosis-list { margin: 0; padding-left: 1.25rem; }
+    .diagnosis-list li { padding: 0.8rem 0; border-top: 1px solid #e1e8ed; }
+    .diagnosis-list li:first-child { padding-top: 0; border-top: 0; }
+    .diagnosis-status, .diagnosis-date { display: block; color: #526574; font-size: 0.9rem; font-weight: 400; }
     a { color: #075c91; text-underline-offset: 0.15em; }
     a:focus-visible { outline: 3px solid #075c91; outline-offset: 3px; }
     #sign-out-row { margin: 1.25rem 0; }
@@ -81,6 +85,13 @@
       </dl>
     </section>
 
+    <section id="diagnosis-section" hidden>
+      <h2>Diagnoses</h2>
+      <p id="diagnosis-empty" hidden>No diagnoses are recorded in this patient's chart.</p>
+      <p id="diagnosis-error" class="error" role="alert" hidden></p>
+      <ul id="diagnosis-list" class="diagnosis-list"></ul>
+    </section>
+
     <p id="sign-out-row" hidden><a href="./" id="sign-out">Sign out</a></p>
   </main>
   <script>
@@ -97,10 +108,12 @@
         return client.patient.read().then(function (patient) {
           showPatient(patient);
           patientLoaded = true;
-          return readObservations(client, patient);
+          return Promise.all([
+            readObservations(client, patient).then(showObservations, showObservationError),
+            readConditions(client, patient).then(showConditions, showConditionError)
+          ]);
         });
       })
-      .then(showObservations)
       .catch(function (error) {
         document.getElementById("loading").hidden = true;
         if (cameBackFromAuth || patientLoaded) {
@@ -139,6 +152,113 @@
           ? bundle.entry.map(function (entry) { return entry.resource; }).filter(Boolean)
           : [];
       });
+    }
+
+    // This function searches Condition using the authorized client's patient id.
+    // It reads the returned Bundle entries so the student sees only diagnoses for the signed-in patient.
+    function readConditions(client, patient) {
+      var patientId = client.patient && client.patient.id;
+      if (!patientId) {
+        return Promise.reject(new Error("We could not identify the signed-in patient for the diagnosis search."));
+      }
+      return client.request("Condition?patient=" + encodeURIComponent(patientId)).then(function (bundle) {
+        return bundle && Array.isArray(bundle.entry)
+          ? bundle.entry.map(function (entry) { return entry.resource; }).filter(Boolean)
+          : [];
+      });
+    }
+
+    // This function reads Condition.code, clinicalStatus, recordedDate, onsetDateTime, and onsetPeriod.start.
+    // The student should see a diagnosis name with its status and date when available, or a clear empty state.
+    function showConditions(conditions) {
+      var section = document.getElementById("diagnosis-section");
+      var list = document.getElementById("diagnosis-list");
+      section.hidden = false;
+      list.textContent = "";
+      if (!conditions.length) {
+        document.getElementById("diagnosis-empty").hidden = false;
+        return;
+      }
+
+      conditions.sort(function (a, b) {
+        return conditionTime(b) - conditionTime(a);
+      });
+      conditions.forEach(function (condition) {
+        var item = document.createElement("li");
+        var name = document.createElement("strong");
+        name.textContent = conditionName(condition);
+        item.appendChild(name);
+
+        var status = conditionStatus(condition);
+        if (status) {
+          var statusNode = document.createElement("span");
+          statusNode.className = "diagnosis-status";
+          statusNode.textContent = status;
+          item.appendChild(statusNode);
+        }
+
+        var date = condition.onsetDateTime || (condition.onsetPeriod && condition.onsetPeriod.start) || condition.recordedDate;
+        if (date) {
+          var dateNode = document.createElement("span");
+          dateNode.className = "diagnosis-date";
+          dateNode.textContent = "Recorded " + formatDate(date);
+          item.appendChild(dateNode);
+        }
+        list.appendChild(item);
+      });
+    }
+
+    // This function reads Condition.code.text or coding.display to name a diagnosis.
+    // The student should see the diagnosis in plain language, or "Diagnosis not recorded" if no display text exists.
+    function conditionName(condition) {
+      var concept = condition && condition.code;
+      if (concept && concept.text) return concept.text;
+      var codings = concept && Array.isArray(concept.coding) ? concept.coding : [];
+      var coding = codings.filter(function (item) { return item && item.display; })[0];
+      return coding ? coding.display : "Diagnosis not recorded";
+    }
+
+    // This function reads Condition.clinicalStatus and falls back to verificationStatus.
+    // The student should see whether the diagnosis is active, resolved, or has another recorded status.
+    function conditionStatus(condition) {
+      var concept = condition.clinicalStatus || condition.verificationStatus;
+      if (!concept) return "";
+      if (concept.text) return concept.text;
+      var codings = Array.isArray(concept.coding) ? concept.coding : [];
+      return codings.length ? (codings[0].display || codings[0].code || "") : "";
+    }
+
+    // This function reads Condition.recordedDate, onsetDateTime, or onsetPeriod.start to sort diagnoses newest first.
+    // The student should see the most recently recorded or dated diagnosis at the top.
+    function conditionTime(condition) {
+      var date = condition.recordedDate || condition.onsetDateTime
+        || (condition.onsetPeriod && condition.onsetPeriod.start);
+      var parsed = date ? Date.parse(date) : 0;
+      return isNaN(parsed) ? 0 : parsed;
+    }
+
+    // This function displays a Condition date in a readable local format.
+    // The student should see the date without a raw ISO timestamp.
+    function formatDate(date) {
+      var parsed = new Date(date);
+      return isNaN(parsed.getTime()) ? date : new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(parsed);
+    }
+
+    // This function reports an Observation search problem without hiding the patient identity or diagnoses.
+    // The student should see a clear message while the rest of the page remains available.
+    function showObservationError(error) {
+      document.getElementById("loading").hidden = true;
+      document.getElementById("results-section").hidden = false;
+      showError(error);
+    }
+
+    // This function reports a Condition search problem inside the diagnosis section.
+    // The student should still see identity and results plus a plain-language diagnosis error.
+    function showConditionError(error) {
+      document.getElementById("diagnosis-section").hidden = false;
+      var node = document.getElementById("diagnosis-error");
+      node.hidden = false;
+      node.textContent = "We could not load diagnoses. Please try again later.";
     }
 
     // This function reads Observation.code, component, valueQuantity, effectiveDateTime, and issued to choose and display the latest requested results.
@@ -319,5 +439,6 @@
   </script>
 </body>
 </html>
+
 
 
