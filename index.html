@@ -6,30 +6,42 @@
   <title>Patient record | SMART Patient App</title>
   <script src="https://cdn.jsdelivr.net/npm/fhirclient@3.0.1/bundle/fhir-client.js"></script>
   <style>
-    :root { color-scheme: light; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #172b3a; background: #f3f6f8; }
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: #172b3a;
+      background: #f5f7f9;
+      font-synthesis: none;
+    }
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 1.25rem; line-height: 1.5; font-size: 1rem; }
-    main { max-width: 48rem; margin: 0 auto; }
-    h1 { margin: 0 0 1.25rem; font-size: clamp(1.75rem, 5vw, 2.25rem); line-height: 1.2; }
-    h2 { margin: 0 0 0.75rem; font-size: 1.3rem; }
-    section, .status { margin: 1rem 0; padding: 1.25rem; background: #fff; border: 1px solid #ccd7df; border-radius: 0.75rem; }
-    dl { display: grid; grid-template-columns: minmax(7rem, 1fr) 2fr; gap: 0.6rem 1rem; margin: 0; }
-    dt { font-weight: 650; }
-    dd { margin: 0; overflow-wrap: anywhere; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 0.8rem 0.55rem; border-bottom: 1px solid #d7e0e6; text-align: left; vertical-align: top; }
-    th { font-weight: 650; }
-    tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
-    .result-date { display: block; margin-top: 0.2rem; color: #42586a; font-size: 0.9rem; }
+    body { margin: 0; padding: clamp(1rem, 4vw, 2.5rem); line-height: 1.5; font-size: 1rem; }
+    main { max-width: 54rem; margin: 0 auto; }
+    h1 { margin: 0 0 1.5rem; font-size: clamp(2rem, 5vw, 2.75rem); line-height: 1.1; letter-spacing: -0.035em; }
+    h2 { margin: 0 0 1.25rem; font-size: 1.25rem; letter-spacing: -0.015em; }
+    section, .status { margin: 1rem 0; padding: clamp(1.1rem, 3vw, 1.6rem); background: #fff; border: 1px solid #d6e0e7; border-radius: 1rem; box-shadow: 0 0.15rem 0.6rem rgb(23 43 58 / 4%); }
+    #record { border-top: 0.25rem solid #167a72; }
+    dl.identity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.1rem 2rem; margin: 0; }
+    .identity div { min-width: 0; }
+    .identity dt, .results-list dt { color: #526574; font-size: 0.9rem; font-weight: 600; }
+    .identity dd { margin: 0.15rem 0 0; font-size: 1.05rem; font-weight: 600; overflow-wrap: anywhere; }
+    .results-list { margin: 0; }
+    .results-list > div { display: grid; grid-template-columns: minmax(9rem, 1fr) 2fr; align-items: center; gap: 1rem; padding: 1rem 0; border-top: 1px solid #e1e8ed; }
+    .results-list > div:first-child { border-top: 0; padding-top: 0; }
+    .results-list > div:last-child { padding-bottom: 0; }
+    .results-list dd { margin: 0; font-size: 1.15rem; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    .result-date { display: block; margin-top: 0.15rem; color: #526574; font-size: 0.88rem; font-weight: 400; }
     .error { border-left: 0.3rem solid #8b1e1e; }
     a { color: #075c91; text-underline-offset: 0.15em; }
     a:focus-visible { outline: 3px solid #075c91; outline-offset: 3px; }
-    @media (max-width: 32rem) {
-      body { padding: 0.75rem; }
-      section, .status { padding: 1rem; }
-      dl { grid-template-columns: 1fr; gap: 0.15rem; }
-      dd { margin-bottom: 0.55rem; }
-      th, td { padding: 0.7rem 0.35rem; }
+    #sign-out-row { margin: 1.25rem 0; }
+    @media (max-width: 34rem) {
+      body { padding: 1rem; }
+      dl.identity { grid-template-columns: 1fr 1fr; gap: 0.9rem 1rem; }
+      .results-list > div { grid-template-columns: minmax(7rem, 0.85fr) 1.15fr; gap: 0.65rem; }
+    }
+    @media (max-width: 22rem) {
+      dl.identity { grid-template-columns: 1fr; }
+      .results-list > div { grid-template-columns: 1fr; gap: 0.2rem; }
     }
   </style>
 </head>
@@ -47,15 +59,11 @@
 
     <section id="record" hidden>
       <h2>Patient identity</h2>
-      <dl>
-        <dt>Name</dt>
-        <dd id="name"></dd>
-        <dt>Gender</dt>
-        <dd id="gender"></dd>
-        <dt>Birth date</dt>
-        <dd id="birth-date"></dd>
-        <dt>Age</dt>
-        <dd id="age"></dd>
+      <dl class="identity">
+        <div><dt>Name</dt><dd id="name"></dd></div>
+        <div><dt>Gender</dt><dd id="gender"></dd></div>
+        <div><dt>Birth date</dt><dd id="birth-date"></dd></div>
+        <div><dt>Age</dt><dd id="age"></dd></div>
       </dl>
     </section>
 
@@ -65,17 +73,12 @@
     <section id="results-section" hidden>
       <h2>Recent results</h2>
       <p id="empty-state" hidden>The sandbox patient has no matching observations.</p>
-      <table id="results-table">
-        <thead>
-          <tr><th scope="col">Result</th><th scope="col">Value</th></tr>
-        </thead>
-        <tbody>
-          <tr><th scope="row">Height</th><td id="height-result"></td></tr>
-          <tr><th scope="row">Blood pressure</th><td id="blood-pressure-result"></td></tr>
-          <tr><th scope="row">HDL</th><td id="hdl-result"></td></tr>
-          <tr><th scope="row">LDL</th><td id="ldl-result"></td></tr>
-        </tbody>
-      </table>
+      <dl class="results-list" id="results-table">
+        <div><dt>Height</dt><dd id="height-result"></dd></div>
+        <div><dt>Blood pressure</dt><dd id="blood-pressure-result"></dd></div>
+        <div><dt>HDL</dt><dd id="hdl-result"></dd></div>
+        <div><dt>LDL</dt><dd id="ldl-result"></dd></div>
+      </dl>
     </section>
 
     <p id="sign-out-row" hidden><a href="./" id="sign-out">Sign out</a></p>
@@ -86,7 +89,7 @@
     var observationCodes = ["8302-2", "85354-9", "8480-6", "8462-4", "2085-9", "13457-7"];
     var patientLoaded = false;
 
-    // ready() restores the authorized SMART session, then reads this patient''s Patient resource.
+    // ready() restores the authorized SMART session, then reads this patient's Patient resource.
     // It reads the Patient data so identity stays visible even if the Observation search fails.
     FHIR.oauth2.ready()
       .then(function (client) {
@@ -122,7 +125,7 @@
       document.getElementById("age").textContent = formatAge(patient.birthDate);
     }
 
-    // This function searches Observation by the authorized client''s patient id and the requested LOINC codes.
+    // This function searches Observation by the authorized client's patient id and the requested LOINC codes.
     // It reads the search Bundle entries; the student should see only results belonging to the signed-in patient.
     function readObservations(client, patient) {
       var patientId = client.patient && client.patient.id;
@@ -181,7 +184,7 @@
       return matches[0] || null;
     }
 
-    // This function reads a CodeableConcept''s coding codes so panel and component observations can be matched by LOINC code.
+    // This function reads a CodeableConcept's coding codes so panel and component observations can be matched by LOINC code.
     // The student should see the requested result even if the server includes other codes in the concept.
     function hasCode(concept, code) {
       var codings = concept && Array.isArray(concept.coding) ? concept.coding : [];
@@ -210,7 +213,7 @@
       return observation && observation.valueQuantity ? observation.valueQuantity : null;
     }
 
-    // This function reads a result quantity''s value, unit, and the observation''s effectiveDateTime or issued date.
+    // This function reads a result quantity's value, unit, and the observation's effectiveDateTime or issued date.
     // The student should see the value with its unit and the result date when supplied.
     function renderResult(elementId, quantity, observation) {
       var node = document.getElementById(elementId);
@@ -249,7 +252,10 @@
         return "Not recorded";
       }
       var unit = quantityUnit(quantity);
-      return String(quantity.value) + (unit ? " " + unit : "");
+      var value = typeof quantity.value === "number"
+        ? quantity.value.toLocaleString(undefined, { maximumFractionDigits: 2 })
+        : String(quantity.value);
+      return value + (unit ? " " + unit : "");
     }
 
     // This function reads Quantity.unit and falls back to Quantity.code when a display unit is absent.
@@ -262,7 +268,9 @@
     // The student should see the supplied result date below its measurement.
     function displayDate(observation) {
       var date = observation && (observation.effectiveDateTime || observation.issued);
-      return date ? date : "";
+      if (!date) return "";
+      var parsed = new Date(date);
+      return isNaN(parsed.getTime()) ? date : new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(parsed);
     }
 
     // This function adds a date as secondary text without changing the value label.
@@ -287,7 +295,7 @@
       return (given + " " + family).trim() || "Name not recorded";
     }
 
-    // This function reads Patient.birthDate to calculate age using today''s date.
+    // This function reads Patient.birthDate to calculate age using today's date.
     // The student should see age in years or "Not recorded" when birth date is absent.
     function formatAge(birthDate) {
       if (!birthDate) return "Not recorded";
@@ -302,7 +310,7 @@
     }
 
     // This function displays a plain-language explanation while keeping the patient identity on screen.
-    // The student should see what failed and can still confirm which patient''s record is open.
+    // The student should see what failed and can still confirm which patient's record is open.
     function showError(error) {
       var node = document.getElementById("error");
       node.hidden = false;
@@ -311,4 +319,5 @@
   </script>
 </body>
 </html>
+
 
