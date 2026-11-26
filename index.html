@@ -31,10 +31,12 @@
     .results-list dd { margin: 0; font-size: 1.15rem; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
     .result-date { display: block; margin-top: 0.15rem; color: #526574; font-size: 0.88rem; font-weight: 400; }
     .error { border-left: 0.3rem solid #8b1e1e; }
+    .diagnosis-group + .diagnosis-group { margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid #e1e8ed; }
+    .diagnosis-group h3 { margin: 0 0 0.35rem; font-size: 1.05rem; }
     .diagnosis-list { margin: 0; padding-left: 1.25rem; }
-    .diagnosis-list li { padding: 0.8rem 0; border-top: 1px solid #e1e8ed; }
-    .diagnosis-list li:first-child { padding-top: 0; border-top: 0; }
+    .diagnosis-list li { padding: 0.65rem 0; }
     .diagnosis-status, .diagnosis-date { display: block; color: #526574; font-size: 0.9rem; font-weight: 400; }
+    .diagnosis-note { margin: -0.5rem 0 1rem; color: #526574; font-size: 0.9rem; }
     a { color: #075c91; text-underline-offset: 0.15em; }
     a:focus-visible { outline: 3px solid #075c91; outline-offset: 3px; }
     #sign-out-row { margin: 1.25rem 0; }
@@ -87,9 +89,10 @@
 
     <section id="diagnosis-section" hidden>
       <h2>Diagnoses</h2>
+      <p class="diagnosis-note">Grouped by the type recorded in the diagnosis coding when available.</p>
       <p id="diagnosis-empty" hidden>No diagnoses are recorded in this patient's chart.</p>
       <p id="diagnosis-error" class="error" role="alert" hidden></p>
-      <ul id="diagnosis-list" class="diagnosis-list"></ul>
+      <div id="diagnosis-list"></div>
     </section>
 
     <p id="sign-out-row" hidden><a href="./" id="sign-out">Sign out</a></p>
@@ -168,13 +171,13 @@
       });
     }
 
-    // This function reads Condition.code, clinicalStatus, recordedDate, onsetDateTime, and onsetPeriod.start.
-    // The student should see a diagnosis name with its status and date when available, or a clear empty state.
+    // This function reads Condition.code, category, clinicalStatus, recordedDate, and onset fields to group and display diagnoses.
+    // The student should see diagnoses grouped as disorders, findings, FHIR categories, or other/unspecified.
     function showConditions(conditions) {
       var section = document.getElementById("diagnosis-section");
-      var list = document.getElementById("diagnosis-list");
+      var container = document.getElementById("diagnosis-list");
       section.hidden = false;
-      list.textContent = "";
+      container.textContent = "";
       if (!conditions.length) {
         document.getElementById("diagnosis-empty").hidden = false;
         return;
@@ -183,29 +186,97 @@
       conditions.sort(function (a, b) {
         return conditionTime(b) - conditionTime(a);
       });
+      var groups = {};
       conditions.forEach(function (condition) {
-        var item = document.createElement("li");
-        var name = document.createElement("strong");
-        name.textContent = conditionName(condition);
-        item.appendChild(name);
-
-        var status = conditionStatus(condition);
-        if (status) {
-          var statusNode = document.createElement("span");
-          statusNode.className = "diagnosis-status";
-          statusNode.textContent = status;
-          item.appendChild(statusNode);
-        }
-
-        var date = condition.onsetDateTime || (condition.onsetPeriod && condition.onsetPeriod.start) || condition.recordedDate;
-        if (date) {
-          var dateNode = document.createElement("span");
-          dateNode.className = "diagnosis-date";
-          dateNode.textContent = "Recorded " + formatDate(date);
-          item.appendChild(dateNode);
-        }
-        list.appendChild(item);
+        var label = diagnosisCategory(condition);
+        if (!groups[label]) groups[label] = [];
+        groups[label].push(condition);
       });
+
+      Object.keys(groups).sort(function (a, b) {
+        var preferred = ["Disorders", "Findings", "Problem list", "Encounter diagnoses", "Health concerns", "Other / unspecified"];
+        var aRank = preferred.indexOf(a) === -1 ? preferred.length : preferred.indexOf(a);
+        var bRank = preferred.indexOf(b) === -1 ? preferred.length : preferred.indexOf(b);
+        return aRank - bRank || a.localeCompare(b);
+      }).forEach(function (label) {
+        var group = document.createElement("div");
+        group.className = "diagnosis-group";
+        var heading = document.createElement("h3");
+        heading.textContent = label;
+        group.appendChild(heading);
+        var list = document.createElement("ul");
+        list.className = "diagnosis-list";
+        groups[label].forEach(function (condition) {
+          var item = document.createElement("li");
+          var name = document.createElement("strong");
+          name.textContent = conditionName(condition);
+          item.appendChild(name);
+
+          var status = conditionStatus(condition);
+          if (status) {
+            var statusNode = document.createElement("span");
+            statusNode.className = "diagnosis-status";
+            statusNode.textContent = status;
+            item.appendChild(statusNode);
+          }
+
+          var date = condition.onsetDateTime || (condition.onsetPeriod && condition.onsetPeriod.start) || condition.recordedDate;
+          if (date) {
+            var dateNode = document.createElement("span");
+            dateNode.className = "diagnosis-date";
+            dateNode.textContent = "Recorded " + formatDate(date);
+            item.appendChild(dateNode);
+          }
+          list.appendChild(item);
+        });
+        group.appendChild(list);
+        container.appendChild(group);
+      });
+    }
+
+    // This function reads Condition.code.coding system/display semantic tags, then Condition.category codes if no tag exists.
+    // The student should see "Disorders" or "Findings" when SNOMED CT identifies that kind, otherwise an explicit FHIR category or unspecified group.
+    function diagnosisCategory(condition) {
+      var codings = condition.code && Array.isArray(condition.code.coding) ? condition.code.coding : [];
+      var snomed = codings.filter(function (coding) {
+        return coding.system === "http://snomed.info/sct" && coding.display;
+      });
+      var semanticTags = {
+        disorder: "Disorders",
+        finding: "Findings",
+        event: "Events",
+        situation: "Situations",
+        procedure: "Procedures",
+        "observable entity": "Observable entities",
+        "clinical finding": "Findings"
+      };
+      for (var i = 0; i < snomed.length; i += 1) {
+        var match = snomed[i].display.match(/\\(([^()]*)\\)\\s*$/);
+        if (match) {
+          var key = match[1].toLowerCase();
+          if (semanticTags[key]) return semanticTags[key];
+        }
+      }
+
+      var categories = Array.isArray(condition.category) ? condition.category : [];
+      var categoryCodings = [];
+      categories.forEach(function (category) {
+        var codings = category && Array.isArray(category.coding) ? category.coding : [];
+        categoryCodings = categoryCodings.concat(codings);
+      });
+      if (categoryCodings.some(function (coding) {
+        return coding.system === "http://terminology.hl7.org/CodeSystem/condition-category"
+          && coding.code === "problem-list-item";
+      })) return "Problem list";
+      if (categoryCodings.some(function (coding) {
+        return coding.system === "http://terminology.hl7.org/CodeSystem/condition-category"
+          && coding.code === "encounter-diagnosis";
+      })) return "Encounter diagnoses";
+      if (categoryCodings.some(function (coding) {
+        return coding.system === "http://hl7.org/fhir/us/core/CodeSystem/condition-category"
+          && coding.code === "health-concern";
+      })) return "Health concerns";
+      return "Other / unspecified";
     }
 
     // This function reads Condition.code.text or coding.display to name a diagnosis.
@@ -439,6 +510,8 @@
   </script>
 </body>
 </html>
+
+
 
 
 
